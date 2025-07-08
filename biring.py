@@ -15,6 +15,11 @@ class biring(BaseTopology):
         super().__init__()
         self.nodes = controllers
 
+    def makeTopology(self, options, network, IntLink, ExtLink, Router):
+
+        link_lat = options.link_latency
+        router_lat = options.router_latency
+
 
 
 
