@@ -9,7 +9,7 @@ from m5.objects import *
 
 
 class biring(BaseTopology):
-    description=("clockwise bidirectional ring")
+    description= "clockwise bidirectional ring"
 
 
 
@@ -33,4 +33,3 @@ class biring(BaseTopology):
 
 
 
-    
