@@ -11,6 +11,12 @@ from m5.objects import *
 class biring(BaseTopology):
     description= "clockwise bidirectional ring"
 
+    def __init___init_(self, controller):
+        super().__init__()
+        self.nodes = controllers
+
+
+
 
 
 
