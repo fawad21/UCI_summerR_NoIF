@@ -57,26 +57,4 @@ class meshcon_noif(BaseTopology):
                         weight   = 1)
             ); next_id += 1
 
-        # outer FD square
-        for a, b in [(0,1), (1,2), (2,5), (5,8), (8,7), (7,6), (6,3), (3,0)]:
-            add_bidir(a, b)
-
-        # spokes to centre FD4 (index 4)
-        for fd in [0,1,2,3,5,6,7,8]:
-            add_bidir(fd, 4)
-
-        # FD ↔ neighbouring UD links
-        neighbour_pairs = [
-            (0,9), (3,9),          # UD1
-            (1,10), (2,10), (5,10),# UD2
-            (3,11), (6,11), (7,11),# UD3
-            (5,12), (8,12), (7,12) # UD4
-        ]
-        for a, b in neighbour_pairs:
-            add_bidir(a, b)
-
-        # UD inner square (red links)
-        for a, b in [(9,10), (10,12), (12,11), (11,9)]:
-            add_bidir(a, b)
-
-        net.int_links = int_links
+        
