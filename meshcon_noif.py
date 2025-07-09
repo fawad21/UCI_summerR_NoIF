@@ -16,3 +16,5 @@ class meshcon_noif(BaseTopology):
         super().__init__()
         assert len(controllers) == 13, "implementing only 13 controllers"
         self.nodes = controllers              
+
+    def makeTopology (self)
