@@ -7,108 +7,175 @@ Refrence: https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=8771326
 """
 
 from topologies.BaseTopology import BaseTopology
-from m5.objects   import *
+from m5.objects import *
+import math
 
 class meshcon_noif(BaseTopology):
-    description="Bidirectional FD/UD cross-mesh (13 routers)"
+    description='Scalable 2D Meshed Network of FD and UD Routers (Custom Topology)'
 
     def __init__(self, controllers):
-        super().__init__()
-        assert len(controllers) == 13, "implementing only 13 controllers"
-        self.nodes = controllers              
+        super().__init__() 
+        self.nodes = controllers
 
-    def makeTopology(self, opts, net, IntLink, ExtLink, Router):
+    def makeTopology(self, options, network, IntLink, ExtLink, Router):
 
-        link_lat   = opts.link_latency
-        router_lat = opts.router_latency
-        n          = len(self.nodes)
+        fd_link_latency = getattr(options, 'fd_link_latency', 2)  #can change the latency here
+        ud_link_latency = getattr(options, 'ud_link_latency', 4)  
+        router_latency = options.router_latency 
 
-        #  routers
-        routers = [Router(router_id=i, latency=router_lat) for i in range(n)]
-        net.routers = routers
+        k = getattr(options, 'k_val', 10) # Default to 3 if not provided
+        if k < 1:
+            fatal("k_val must be at least 1 for this topology.")
 
-        # ext links
-        net.ext_links = [
-            ExtLink(link_id=i,
-                    ext_node=ctrl,
-                    int_node=routers[i],
-                    latency=link_lat)
-            for i, ctrl in enumerate(self.nodes)
-        ]
+        num_fd_routers = k * k
+        num_ud_routers = (k - 1) * (k - 1) if k >= 2 else 0
+        num_routers_in_network = num_fd_routers + num_ud_routers
 
-        #  int links
+        if len(self.nodes) != num_routers_in_network:
+            fatal(f"Number of controllers ({len(self.nodes)}) must be equal to total routers ({num_routers_in_network}) for this custom topology with k={k}.")
+
+        print(f"--- Creating Scalable 2D Meshed Network of FD and UD Routers ---")
+        print(f"FD mesh side length (k) = {k}")
+        print(f"Number of FD routers: {num_fd_routers}")
+        print(f"Number of UD routers: {num_ud_routers}")
+        print(f"Total routers in network: {num_routers_in_network}")
+        print(f"Total attached controllers (nodes): {len(self.nodes)}")
+        print(f"FD/UD Link Latency: {fd_link_latency} cycles")
+        print(f"UD/UD Link Latency: {ud_link_latency} cycles")
+        print(f"Router Latency: {router_latency} cycles")
+
+        fd_routers = [Router(router_id=i, latency=router_latency) for i in range(num_fd_routers)]
+        ud_router_start_id = num_fd_routers
+        ud_routers = [Router(router_id=ud_router_start_id + i, latency=router_latency) for i in range(num_ud_routers)]
+        
+        network.routers = fd_routers + ud_routers
+
+        link_count = 0
+        ext_links = []
+
+
+        print(f"DEBUG: k_val being used: {k}")
+        print(f"DEBUG: Calculated total routers: {num_routers_in_network}")
+        print(f"DEBUG: Actual nodes received: {len(self.nodes)}")
+
+
+        # --- External Links (Router to Controller) ---
+        for i, ctrl in enumerate(self.nodes):
+            ext_links.append(ExtLink(link_id=link_count, ext_node=ctrl,
+                                     int_node=network.routers[i],
+                                     latency = options.link_latency)) 
+            link_count += 1
+        network.ext_links = ext_links
+        print(f"Created {len(ext_links)} external links.")
+
+        # --- Internal Links (Router-to-Router Connections) ---
         int_links = []
-        next_id   = len(net.ext_links)     
+        print('\n--- Creating Internal Links ---')
 
-        def add_bidir(a, b):
-            nonlocal next_id
-            int_links.append(
-                IntLink(link_id = next_id,
-                        src_node = routers[a],
-                        dst_node = routers[b],
-                        latency  = link_lat,
-                        weight   = 1)
-            ); next_id += 1
-            int_links.append(
-                IntLink(link_id = next_id,
-                        src_node = routers[b],
-                        dst_node = routers[a],
-                        latency  = link_lat,
-                        weight   = 1)
-            ); next_id += 1
+        # Helper to add a bidirectional link with specified latency
+        def add_bidir_link(src_router, dst_router, latency_val):
+            nonlocal link_count
+            int_links.append(IntLink(link_id=link_count, src_node=src_router, dst_node=dst_router, latency=latency_val, weight=1))
+            link_count += 1
+            int_links.append(IntLink(link_id=link_count, src_node=dst_router, dst_node=src_router, latency=latency_val, weight=1))
+            link_count += 1
 
-          # a) FD-to-FD local mesh connections (3x3 grid)
-        # Horizontal links
-        for row_start_idx in [0, 3, 6]: # For rows starting at FD1(0), FD4(3), FD7(6)
-            for col_offset in range(2): # Connect (0,1), (1,2) for each row
-                add_bidir(row_start_idx + col_offset, row_start_idx + col_offset + 1)
-                print(f"FD-FD H link: R{row_start_idx + col_offset} <-> R{row_start_idx + col_offset + 1}")
+        # Helper to get FD router coordinates
+        def get_fd_coords(fd_router_id):
+            x = fd_router_id // k
+            y = fd_router_id % k
+            return (x, y)
 
-        # Vertical links
-        for col_start_idx in [0, 1, 2]: # For columns starting at FD1(0), FD2(1), FD3(2)
-            for row_offset in range(2): # Connect (0,3), (3,6) for each column
-                add_bidir(col_start_idx + (row_offset * 3), col_start_idx + ((row_offset + 1) * 3))
-                print(f"FD-FD V link: R{col_start_idx + (row_offset * 3)} <-> R{col_start_idx + ((row_offset + 1) * 3)}")
+        # Helper to get 1D FD router ID from 2D coordinates
+        def get_fd_router_id(x, y):
+            return x * k + y
 
-       
-        add_bidir(0, 4); print(f"FD-FD Spokes: R0 <-> R4") # FD1 <-> FD5
-        add_bidir(2, 4); print(f"FD-FD Spokes: R2 <-> R4") # FD3 <-> FD5
-        add_bidir(6, 4); print(f"FD-FD Spokes: R6 <-> R4") # FD7 <-> FD5
-        add_bidir(8, 4); print(f"FD-FD Spokes: R8 <-> R4") # FD9 <-> FD5
+        # Helper to get UD router coordinates from 1D ID (relative to start of UD routers)
+        def get_ud_coords(ud_router_idx):
+            ud_side_len = (k - 1) if k >= 2 else 0
+            if ud_side_len == 0: return (0,0)
+            ud_x = ud_router_idx // ud_side_len
+            ud_y = ud_router_idx % ud_side_len
+            return (ud_x, ud_y)
 
 
-        # c) FD <-> neighbouring UD links (black lines between FD and UD)
-        print("\n--- Creating FD-UD Links ---")
-        # UD1 (router 9) connects to FD1(0), FD2(1), FD4(3), FD5(4)
-        add_bidir(0, 9); print(f"FD-UD Link: R0 <-> R9 (FD1-UD1)")
-        add_bidir(1, 9); print(f"FD-UD Link: R1 <-> R9 (FD2-UD1)")
-        add_bidir(3, 9); print(f"FD-UD Link: R3 <-> R9 (FD4-UD1)")
-        add_bidir(4, 9); print(f"FD-UD Link: R4 <-> R9 (FD5-UD1)")
+        # 1. FD Mesh Connections (FD-FD links)
+        print("--- Creating FD-FD Links (Mesh Connections) ---")
+        for i in range(num_fd_routers):
+            current_x, current_y = get_fd_coords(i)
+            src_router = fd_routers[i]
 
-        # UD2 (router 10) connects to FD2(1), FD3(2), FD5(4), FD6(5)
-        add_bidir(1, 10); print(f"FD-UD Link: R1 <-> R10 (FD2-UD2)")
-        add_bidir(2, 10); print(f"FD-UD Link: R2 <-> R10 (FD3-UD2)")
-        add_bidir(4, 10); print(f"FD-UD Link: R4 <-> R10 (FD5-UD2)")
-        add_bidir(5, 10); print(f"FD-UD Link: R5 <-> R10 (FD6-UD2)")
+            if current_x + 1 < k: # Connect East
+                neighbor_id = get_fd_router_id(current_x + 1, current_y)
+                add_bidir_link(src_router, fd_routers[neighbor_id], fd_link_latency)
 
-        # UD3 (router 11) connects to FD4(3), FD5(4), FD7(6), FD8(7)
-        add_bidir(3, 11); print(f"FD-UD Link: R3 <-> R11 (FD4-UD3)")
-        add_bidir(4, 11); print(f"FD-UD Link: R4 <-> R11 (FD5-UD3)")
-        add_bidir(6, 11); print(f"FD-UD Link: R6 <-> R11 (FD7-UD3)")
-        add_bidir(7, 11); print(f"FD-UD Link: R7 <-> R11 (FD8-UD3)")
+            if current_y + 1 < k: # Connect South
+                neighbor_id = get_fd_router_id(current_x, current_y + 1)
+                add_bidir_link(src_router, fd_routers[neighbor_id], fd_link_latency)
+        
+        # 2. FD-FD Spokes (Cross Connections - if k is odd and >=3)
+        # This uses fd_link_latency
+        if k % 2 == 1 and k >= 3:
+            print("\n--- Creating FD-FD Spokes (Cross Connections) ---")
+            center_router_id = (k * k) // 2
+            corner_routers = [0, k - 1, (k - 1) * k, (k * k) - 1]
+            for corner_id in corner_routers:
+                add_bidir_link(fd_routers[corner_id], fd_routers[center_router_id], fd_link_latency)
+        elif k % 2 == 0 and k >= 2:
+            print(f"Skipping FD-FD Spokes for even k={k}.")
+        else: # k=1
+            print(f"Skipping FD-FD Spokes for k={k}.")
 
-        # UD4 (router 12) connects to FD5(4), FD6(5), FD8(7), FD9(8)
-        add_bidir(4, 12); print(f"FD-UD Link: R4 <-> R12 (FD5-UD4)")
-        add_bidir(5, 12); print(f"FD-UD Link: R5 <-> R12 (FD6-UD4)")
-        add_bidir(7, 12); print(f"FD-UD Link: R7 <-> R12 (FD8-UD4)")
-        add_bidir(8, 12); print(f"FD-UD Link: R8 <-> R12 (FD9-UD4)")
 
-        # d) UD inner square (red links)
-        print("\n--- Creating UD-UD Links ---")
-        add_bidir(9, 10); print(f"UD-UD Link: R9 <-> R10 (UD1-UD2)")
-        add_bidir(10, 12); print(f"UD-UD Link: R10 <-> R12 (UD2-UD4)")
-        add_bidir(12, 11); print(f"UD-UD Link: R12 <-> R11 (UD4-UD3)")
-        add_bidir(11, 9); print(f"UD-UD Link: R11 <-> R9 (UD3-UD1)")
+        # 3. Connect UD routers if they exist (i.e., k >= 2)
+        if num_ud_routers > 0:
+            # FD-UD links use fd_link_latency
+            print("\n--- Creating FD-UD Links ---")
+            for ud_idx in range(num_ud_routers):
+                ud_x, ud_y = get_ud_coords(ud_idx)
+                src_ud_router = ud_routers[ud_idx]
 
-        net.int_links = int_links
+                for i in range(2): # relative row offset
+                    for j in range(2): # relative col offset
+                        fd_target_x = 2 * ud_x + i
+                        fd_target_y = 2 * ud_y + j
+
+                        if fd_target_x < k and fd_target_y < k:
+                            target_fd_id = get_fd_router_id(fd_target_x, fd_target_y)
+                            dst_fd_router = fd_routers[target_fd_id]
+                            add_bidir_link(src_ud_router, dst_fd_router, fd_link_latency)
+
+            # 4. UD-UD Mesh Connections (Horizontal & Vertical) use ud_link_latency
+            print("\n--- Creating UD-UD Links (Mesh Connections) ---")
+            ud_side_len = (k - 1)
+
+            for ud_row in range(ud_side_len):
+                for ud_col in range(ud_side_len):
+                    src_ud_router = ud_routers[ud_row * ud_side_len + ud_col]
+
+                    if ud_col + 1 < ud_side_len: # Connect East
+                        dst_ud_router = ud_routers[ud_row * ud_side_len + (ud_col + 1)]
+                        add_bidir_link(src_ud_router, dst_ud_router, ud_link_latency)
+
+                    if ud_row + 1 < ud_side_len: # Connect South
+                        dst_ud_router = ud_routers[(ud_row + 1) * ud_side_len + ud_col]
+                        add_bidir_link(src_ud_router, dst_ud_router, ud_link_latency)
+            
+            # 5. UD-UD Diagonal Connections (use ud_link_latency
+            print("\n--- Creating UD-UD Diagonal Links ---")
+            for ud_row in range(ud_side_len):
+                for ud_col in range(ud_side_len):
+                    src_ud_router = ud_routers[ud_row * ud_side_len + ud_col]
+
+                    if ud_row + 1 < ud_side_len and ud_col + 1 < ud_side_len: # Connect South-East
+                        dst_ud_router = ud_routers[(ud_row + 1) * ud_side_len + (ud_col + 1)]
+                        add_bidir_link(src_ud_router, dst_ud_router, ud_link_latency)
+
+                    if ud_row + 1 < ud_side_len and ud_col - 1 >= 0: # Connect South-West
+                        dst_ud_router = ud_routers[(ud_row + 1) * ud_side_len + (ud_col - 1)]
+                        add_bidir_link(src_ud_router, dst_ud_router, ud_link_latency)
+        else:
+            print("Skipping UD-UD and FD-UD links as k < 2 (no UD routers defined).")
+
+        network.int_links = int_links
         print(f"\nTotal internal links created: {len(int_links)}")
